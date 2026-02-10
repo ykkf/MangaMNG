@@ -466,6 +466,71 @@
             setTimeout(() => { toast.classList.add('hidden'); }, 3000);
         }
 
+        // --- Camera Logic ---
+        let videoStream = null;
+
+        function openCamera() {
+            navigateToScreen('screen-camera');
+            startCamera();
+        }
+
+        function closeCamera() {
+            stopCamera();
+            navigateToScreen('screen-home');
+        }
+
+        async function startCamera() {
+            const videoEl = document.getElementById('camera-feed');
+            if (!videoEl) return;
+
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' },
+                    audio: false
+                });
+                videoEl.srcObject = videoStream;
+            } catch (err) {
+                console.error("Camera Error:", err);
+                alert('カメラを起動できませんでした。\nブラウザの権限設定を確認してください。');
+                closeCamera();
+            }
+        }
+
+        function stopCamera() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+        }
+
+        function takePicture() {
+            // Visual feedback
+            const btn = document.getElementById('btn-shutter');
+            if (btn) btn.style.backgroundColor = 'red';
+
+            setTimeout(() => {
+                if (btn) btn.style.backgroundColor = 'white';
+                stopCamera();
+
+                // MOCK OCR: Add a dummy item for now
+                ensureState();
+                const newItem = {
+                    id: Date.now().toString(),
+                    title: '撮影アイテム(仮)',
+                    volume: '1',
+                    publisher: window.state.publishers[0] ? window.state.publishers[0].id : 'shueisha',
+                    status: 'unpurchased',
+                    reason: null,
+                    updatedAt: Date.now()
+                };
+                window.state.unpurchased.unshift(newItem);
+                saveStateLocal();
+                renderHomeLocal();
+
+                showToast('スキャン完了: 撮影アイテム(仮)を追加しました');
+                navigateToScreen('screen-home');
+            }, 500);
+        }
         // Service Worker Update Logic
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js').then(reg => {
@@ -533,7 +598,7 @@
                     <span class="material-icons">edit</span>
                 </button>
 
-                <button id="fab-camera" class="fab">
+                <button id="fab-camera" class="fab" onclick="openCamera()">
                     <span class="material-icons">camera_alt</span>
                 </button>
             </section>
@@ -553,8 +618,8 @@
                     <button id="btn-gallery" class="icon-btn">
                         <span class="material-icons">photo_library</span>
                     </button>
-                    <button id="btn-shutter" class="shutter-btn"></button>
-                    <button id="btn-close-camera" class="icon-btn">
+                    <button id="btn-shutter" class="shutter-btn" onclick="takePicture()"></button>
+                    <button id="btn-close-camera" class="icon-btn" onclick="closeCamera()">
                         <span class="material-icons">close</span>
                     </button>
                 </div>
