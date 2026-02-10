@@ -169,13 +169,21 @@
                 </div>
             `;
 
+            // Reason tag (show on unpurchased items with a reason)
+            const reasonHtml = (!isPurchased && item.reason)
+                ? `<span style="font-size:11px; color:#e65100; background:#fff3e0; padding:2px 6px; border-radius:4px; margin-left:8px;">${item.reason}</span>`
+                : '';
+
             el.innerHTML = `
                 <div class="card-info" onclick="openManualEditFallback('${item.id}')">
                     <div class="card-title">
                         <span style="font-size:12px; color:#666; margin-right:4px;">[${getPubShort(item.publisher)}]</span>
                         ${item.title}
                     </div>
-                    <span class="card-vol">${item.volume}巻</span>
+                    <div style="display:flex; align-items:center;">
+                        <span class="card-vol">${item.volume}巻</span>
+                        ${reasonHtml}
+                    </div>
                 </div>
                 <div class="card-actions">
                     ${checkboxHtml}
@@ -239,11 +247,23 @@
 
             // Populate basics
             ensureState();
-            const item = window.state.unpurchased.find(i => i.id === id);
+            let item = window.state.unpurchased.find(i => i.id === id);
+            if (!item) item = window.state.purchased.find(i => i.id === id);
             if (item) {
                 document.getElementById('detail-title').value = item.title;
                 document.getElementById('detail-volume').value = item.volume;
+
+                // Populate publisher dropdown
+                const pubSelect = document.getElementById('detail-publisher');
+                if (pubSelect) {
+                    pubSelect.innerHTML = generatePublisherOptions(item.publisher);
+                    pubSelect.value = item.publisher;
+                }
             }
+
+            // Update page title
+            const pTitle = document.getElementById('page-title');
+            if (pTitle) pTitle.textContent = 'マンガを編集';
         }
 
         function openManualAdd() {
