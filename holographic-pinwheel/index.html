@@ -12,6 +12,8 @@
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icon.svg">
     <meta name="theme-color" content="#6200ee">
+    <!-- Tesseract.js for OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <script>
         // Emergency Inline Script for Settings & Manual Add
         // This ensures these functions exist even if app.js fails to load or update immediately.
@@ -119,7 +121,25 @@
         // --- Standalone Helper: Render (FORCED) ---
         function renderHomeLocal() {
             ensureState(); // Ensure data is loaded
-            console.log('Forcing Local Render v33');
+            console.log('Forcing Local Render v34');
+
+            // Get search/filter values
+            const searchInput = document.getElementById('search-text');
+            const filterPub = document.getElementById('filter-publisher');
+            const searchText = searchInput ? searchInput.value.trim().toLowerCase() : '';
+            const filterPubVal = filterPub ? filterPub.value : 'all';
+
+            // Filter function
+            function matchesFilter(item) {
+                let matches = true;
+                if (searchText) {
+                    matches = item.title.toLowerCase().includes(searchText);
+                }
+                if (matches && filterPubVal !== 'all') {
+                    matches = item.publisher === filterPubVal;
+                }
+                return matches;
+            }
 
             // 1. Render Unpurchased
             const listUn = document.getElementById('list-unpurchased');
@@ -128,11 +148,15 @@
                 if (!window.state || !window.state.unpurchased || window.state.unpurchased.length === 0) {
                     listUn.innerHTML = '<div class="empty-state">未購入のマンガはありません</div>';
                 } else {
-                    // Sort by updated desc (newest first)
                     const sorted = [...window.state.unpurchased].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-                    sorted.forEach(item => {
-                        listUn.appendChild(createCardLocal(item, 'unpurchased'));
-                    });
+                    const filtered = sorted.filter(matchesFilter);
+                    if (filtered.length === 0) {
+                        listUn.innerHTML = '<div class="empty-state">該当するマンガが見つかりません</div>';
+                    } else {
+                        filtered.forEach(item => {
+                            listUn.appendChild(createCardLocal(item, 'unpurchased'));
+                        });
+                    }
                 }
             }
 
@@ -143,14 +167,34 @@
                 if (!window.state || !window.state.purchased || window.state.purchased.length === 0) {
                     listPur.innerHTML = '<div class="empty-state">購入済みのマンガはありません</div>';
                 } else {
-                    // Sort by updated time desc
                     const sorted = [...window.state.purchased].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-                    sorted.forEach(item => {
-                        listPur.appendChild(createCardLocal(item, 'purchased'));
-                    });
+                    const filtered = sorted.filter(matchesFilter);
+                    if (filtered.length === 0) {
+                        listPur.innerHTML = '<div class="empty-state">該当するマンガが見つかりません</div>';
+                    } else {
+                        filtered.forEach(item => {
+                            listPur.appendChild(createCardLocal(item, 'purchased'));
+                        });
+                    }
                 }
             }
+
+            // 3. Update publisher filter options (keep current selection)
+            updatePublisherFilter();
         }
+
+        function updatePublisherFilter() {
+            const filterPub = document.getElementById('filter-publisher');
+            if (!filterPub || !window.state || !window.state.publishers) return;
+            const currentVal = filterPub.value;
+            let html = '<option value="all">全出版社</option>';
+            window.state.publishers.forEach(p => {
+                html += `<option value="${p.id}">${p.name}</option>`;
+            });
+            filterPub.innerHTML = html;
+            filterPub.value = currentVal; // Restore selection
+        }
+        window.updatePublisherFilter = updatePublisherFilter;
 
         function createCardLocal(item, status) {
             const el = document.createElement('div');
@@ -390,8 +434,20 @@
             }
         }
 
-        // Initial Render
-        window.addEventListener('load', () => { setTimeout(renderHomeLocal, 500); });
+        // Initial Render + Search/Filter Event Listeners
+        window.addEventListener('load', () => {
+            setTimeout(renderHomeLocal, 500);
+
+            // Attach search event listeners
+            const searchInput = document.getElementById('search-text');
+            if (searchInput) {
+                searchInput.addEventListener('input', renderHomeLocal);
+            }
+            const filterPub = document.getElementById('filter-publisher');
+            if (filterPub) {
+                filterPub.addEventListener('change', renderHomeLocal);
+            }
+        });
 
         function navigateToScreen(screenId) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -619,8 +675,10 @@
             }
         }
 
+        // --- OCR Pending Items (temporary before registration) ---
+        window.ocrPendingItems = [];
+
         function takePicture() {
-            // Visual feedback
             const btn = document.getElementById('btn-shutter');
             if (btn) btn.style.backgroundColor = 'red';
 
@@ -628,12 +686,16 @@
                 if (btn) btn.style.backgroundColor = 'white';
 
                 if (videoStream) {
+                    // Capture frame from video
+                    const videoEl = document.getElementById('camera-feed');
+                    const canvas = document.createElement('canvas');
+                    canvas.width = videoEl.videoWidth || 640;
+                    canvas.height = videoEl.videoHeight || 480;
+                    canvas.getContext('2d').drawImage(videoEl, 0, 0);
+                    const dataUrl = canvas.toDataURL('image/png');
                     stopCamera();
-                    // Mock OCR: use temporary current time as ID
-                    processCapturedImage('mock_image_data');
+                    processOCR(dataUrl);
                 } else {
-                    // No stream, maybe clicked shutter without stream?
-                    // Try file input as fallback
                     const fi = document.getElementById('camera-file-input');
                     if (fi) fi.click();
                 }
@@ -650,32 +712,293 @@
 
         function handleFileSelect(input) {
             if (input.files && input.files[0]) {
-                showToast('画像を読み込みました (解析中...)');
-                setTimeout(() => {
-                    processCapturedImage('mock_file_data');
-                }, 1000);
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    processOCR(e.target.result);
+                };
+                reader.readAsDataURL(input.files[0]);
             }
             input.value = '';
         }
 
-        function processCapturedImage(imageData) {
-            ensureState();
-            const newItem = {
-                id: Date.now().toString(),
-                title: '撮影アイテム(仮)',
-                volume: '1',
-                publisher: window.state.publishers[0] ? window.state.publishers[0].id : 'shueisha',
-                status: 'unpurchased',
-                reason: null,
-                updatedAt: Date.now()
-            };
-            window.state.unpurchased.unshift(newItem);
-            saveStateLocal();
-            renderHomeLocal();
-
-            showToast('スキャン完了: 撮影アイテム(仮)を追加しました');
+        // --- OCR Processing with Tesseract.js ---
+        async function processOCR(imageSource) {
+            // Show loading overlay
+            showOcrLoading(true);
             navigateToScreen('screen-home');
+
+            try {
+                const result = await Tesseract.recognize(imageSource, 'jpn+eng', {
+                    logger: m => {
+                        if (m.status === 'recognizing text') {
+                            const pct = Math.round((m.progress || 0) * 100);
+                            const loadMsg = document.getElementById('ocr-loading-text');
+                            if (loadMsg) loadMsg.textContent = `読み取り中... ${pct}%`;
+                        }
+                    }
+                });
+
+                const rawText = result.data.text || '';
+                console.log('OCR Raw:', rawText);
+
+                // Parse lines into potential items
+                const items = parseOcrText(rawText);
+
+                if (items.length === 0) {
+                    showOcrLoading(false);
+                    showToast('テキストを読み取れませんでした');
+                    return;
+                }
+
+                // Store as pending and show edit screen
+                window.ocrPendingItems = items;
+                showOcrLoading(false);
+                renderOcrEditScreen();
+                navigateToScreen('screen-edit');
+            } catch (err) {
+                console.error('OCR Error:', err);
+                showOcrLoading(false);
+                showToast('OCR処理に失敗しました: ' + err.message);
+            }
         }
+
+        function showOcrLoading(show) {
+            let overlay = document.getElementById('ocr-loading-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'ocr-loading-overlay';
+                overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+                overlay.innerHTML = `
+                    <div style="width:60px;height:60px;border:4px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 1s linear infinite;"></div>
+                    <p id="ocr-loading-text" style="color:white;font-size:18px;margin-top:16px;">読み取り中... 0%</p>
+                `;
+                document.body.appendChild(overlay);
+                // Add spin animation if not exists
+                if (!document.getElementById('spin-style')) {
+                    const style = document.createElement('style');
+                    style.id = 'spin-style';
+                    style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+                    document.head.appendChild(style);
+                }
+            }
+            overlay.style.display = show ? 'flex' : 'none';
+        }
+
+        // --- Parse OCR text into items ---
+        function parseOcrText(rawText) {
+            ensureState();
+            const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+            const items = [];
+
+            lines.forEach(line => {
+                // Try to extract volume number
+                let title = line;
+                let volume = '';
+
+                // Match patterns like "タイトル 25巻", "タイトル 25", "タイトル(25)", etc.
+                const volMatch = line.match(/[\s　]*(\d+)[\s　]*巻?[\s　]*$/)
+                    || line.match(/[\(（](\d+)[\)）]/)
+                    || line.match(/[\s　]+(\d+)[\s　]*$/);
+                if (volMatch) {
+                    volume = volMatch[1];
+                    title = line.replace(volMatch[0], '').trim();
+                }
+
+                if (title.length < 1) return; // Skip empty
+
+                items.push({
+                    id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
+                    rawText: line,
+                    title: title,
+                    volume: volume || '1',
+                    publisher: window.state.publishers[0] ? window.state.publishers[0].id : 'shueisha',
+                    suggestions: generateSuggestions(title)
+                });
+            });
+
+            return items;
+        }
+
+        // --- AI Suggestion Generation ---
+        function generateSuggestions(ocrTitle) {
+            ensureState();
+            const suggestions = [];
+            const lowerTitle = ocrTitle.toLowerCase();
+
+            // 1. Check correction dictionary
+            const corrections = JSON.parse(localStorage.getItem('manga_corrections') || '[]');
+            corrections.forEach(c => {
+                if (c.ocrText.toLowerCase() === lowerTitle || lowerTitle.includes(c.ocrText.toLowerCase())) {
+                    suggestions.push({ text: c.correctedText, source: 'history', score: c.count || 1 });
+                }
+            });
+
+            // 2. Match against existing items in library
+            const allItems = [...(window.state.unpurchased || []), ...(window.state.purchased || [])];
+            const seen = new Set(suggestions.map(s => s.text));
+
+            allItems.forEach(item => {
+                if (seen.has(item.title)) return;
+                const itemLower = item.title.toLowerCase();
+                // Fuzzy match: if OCR text contains part of existing title or vice versa
+                if (itemLower.includes(lowerTitle) || lowerTitle.includes(itemLower) ||
+                    levenshteinSimilar(lowerTitle, itemLower, 0.5)) {
+                    suggestions.push({ text: item.title, source: 'library', score: 0.5 });
+                    seen.add(item.title);
+                }
+            });
+
+            // Sort by score desc, limit to 5
+            suggestions.sort((a, b) => b.score - a.score);
+            return suggestions.slice(0, 5);
+        }
+
+        // Simple Levenshtein similarity check
+        function levenshteinSimilar(a, b, threshold) {
+            if (a.length === 0 || b.length === 0) return false;
+            const maxLen = Math.max(a.length, b.length);
+            if (maxLen > 30) return false; // Skip very long strings
+            const matrix = [];
+            for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+            for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+            for (let i = 1; i <= b.length; i++) {
+                for (let j = 1; j <= a.length; j++) {
+                    matrix[i][j] = b[i - 1] === a[j - 1]
+                        ? matrix[i - 1][j - 1]
+                        : Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
+                }
+            }
+            const dist = matrix[b.length][a.length];
+            return (1 - dist / maxLen) >= threshold;
+        }
+
+        // --- Render OCR Edit Screen ---
+        function renderOcrEditScreen() {
+            const list = document.getElementById('ocr-list');
+            if (!list) return;
+            list.innerHTML = '';
+            ensureState();
+
+            window.ocrPendingItems.forEach((item, index) => {
+                const card = document.createElement('div');
+                card.className = 'ocr-edit-card';
+                card.id = 'ocr-card-' + index;
+                card.style.cssText = 'background:white;border-radius:12px;padding:16px;margin:8px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.1);';
+
+                // Suggestion chips HTML
+                let chipsHtml = '';
+                if (item.suggestions && item.suggestions.length > 0) {
+                    chipsHtml = '<div style="display:flex;gap:6px;overflow-x:auto;padding:4px 0;margin-top:4px;">';
+                    item.suggestions.forEach(s => {
+                        const icon = s.source === 'history' ? '🔄' : '📚';
+                        chipsHtml += `<button onclick="applyOcrSuggestion(${index}, '${s.text.replace(/'/g, "\\'")}')"
+                            style="flex-shrink:0;padding:6px 12px;border:1px solid var(--primary-color);background:#f3e8ff;color:var(--primary-color);border-radius:20px;font-size:12px;cursor:pointer;white-space:nowrap;">
+                            ${icon} ${s.text}
+                        </button>`;
+                    });
+                    chipsHtml += '</div>';
+                }
+
+                // Publisher options
+                const pubOptions = generatePublisherOptions(item.publisher);
+
+                card.innerHTML = `
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span style="font-size:11px;color:#999;">OCR: ${item.rawText}</span>
+                        <button onclick="removeOcrItem(${index})" style="border:none;background:none;color:#ff5252;font-size:20px;cursor:pointer;padding:4px;">
+                            <span class="material-icons" style="font-size:20px;">delete</span>
+                        </button>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <label style="font-size:12px;color:#666;">タイトル</label>
+                        <input type="text" id="ocr-title-${index}" value="${item.title}" class="text-input" style="font-size:16px;font-weight:bold;">
+                        ${chipsHtml}
+                    </div>
+                    <div style="display:flex;gap:12px;margin-bottom:8px;">
+                        <div style="flex:0 0 80px;">
+                            <label style="font-size:12px;color:#666;">巻数</label>
+                            <input type="number" id="ocr-vol-${index}" value="${item.volume}" class="text-input" style="text-align:center;">
+                        </div>
+                        <div style="flex:1;">
+                            <label style="font-size:12px;color:#666;">出版社</label>
+                            <select id="ocr-pub-${index}" class="text-input" onchange="checkPublisherSelect(this)">
+                                ${pubOptions}
+                            </select>
+                        </div>
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+
+            if (window.ocrPendingItems.length === 0) {
+                list.innerHTML = '<div class="empty-state" style="padding:40px;">認識されたアイテムがありません</div>';
+            }
+        }
+
+        function applyOcrSuggestion(index, text) {
+            const input = document.getElementById('ocr-title-' + index);
+            if (input) input.value = text;
+        }
+        window.applyOcrSuggestion = applyOcrSuggestion;
+
+        function removeOcrItem(index) {
+            window.ocrPendingItems.splice(index, 1);
+            renderOcrEditScreen();
+        }
+        window.removeOcrItem = removeOcrItem;
+
+        // --- Register All OCR Items ---
+        function saveOcrResults() {
+            ensureState();
+            const corrections = JSON.parse(localStorage.getItem('manga_corrections') || '[]');
+            let count = 0;
+
+            window.ocrPendingItems.forEach((item, index) => {
+                const titleInput = document.getElementById('ocr-title-' + index);
+                const volInput = document.getElementById('ocr-vol-' + index);
+                const pubSelect = document.getElementById('ocr-pub-' + index);
+
+                const title = titleInput ? titleInput.value.trim() : item.title;
+                const volume = volInput ? volInput.value : item.volume;
+                let publisher = pubSelect ? pubSelect.value : item.publisher;
+                if (publisher === 'add-new' || !publisher) publisher = window.state.publishers[0]?.id || 'shueisha';
+
+                if (!title) return;
+
+                // Save correction if title was modified
+                if (title !== item.title && item.rawText) {
+                    const existing = corrections.find(c => c.ocrText === item.rawText);
+                    if (existing) {
+                        existing.correctedText = title;
+                        existing.count = (existing.count || 1) + 1;
+                    } else {
+                        corrections.push({ ocrText: item.rawText, correctedText: title, count: 1 });
+                    }
+                }
+
+                const newItem = {
+                    id: Date.now().toString() + '_' + index,
+                    title: title,
+                    volume: volume,
+                    publisher: publisher,
+                    status: 'unpurchased',
+                    reason: null,
+                    updatedAt: Date.now()
+                };
+                window.state.unpurchased.unshift(newItem);
+                count++;
+            });
+
+            // Save correction dictionary
+            localStorage.setItem('manga_corrections', JSON.stringify(corrections));
+
+            saveStateLocal();
+            window.ocrPendingItems = [];
+            renderHomeLocal();
+            navigateToScreen('screen-home');
+            showToast(`${count}件のマンガを登録しました`);
+        }
+        window.saveOcrResults = saveOcrResults;
 
         // --- Delete & Reason Functions ---
         function deleteDetailItem() {
@@ -742,6 +1065,24 @@
         window.deleteDetailItem = deleteDetailItem;
         window.openDetailReasonModal = openDetailReasonModal;
         window.saveReason = saveReason;
+
+        // --- OCR Edit Screen Button Handlers ---
+        window.addEventListener('load', function () {
+            const btnCancelEdit = document.getElementById('btn-cancel-edit');
+            if (btnCancelEdit) {
+                btnCancelEdit.onclick = function () {
+                    window.ocrPendingItems = [];
+                    navigateToScreen('screen-home');
+                };
+            }
+            const btnSaveEdit = document.getElementById('btn-save-edit');
+            if (btnSaveEdit) {
+                btnSaveEdit.onclick = function () {
+                    saveOcrResults();
+                };
+            }
+        });
+
         // Service Worker Update Logic
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js').then(reg => {
