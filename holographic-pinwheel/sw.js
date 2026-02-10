@@ -1,4 +1,4 @@
-const CACHE_NAME = 'manga-manager-v35-global-stream';
+const CACHE_NAME = 'manga-manager-v36-final-missing-features';
 const ASSETS = [
     './',
     './index.html',

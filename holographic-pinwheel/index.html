@@ -793,6 +793,19 @@
             </section>
         </main>
 
+        <!-- Modal: Reason -->
+        <div id="modal-reason" class="modal hidden">
+            <div class="modal-content">
+                <h3 style="margin-bottom: 16px;">未購入の理由</h3>
+                <input type="text" id="reason-text" class="text-input" placeholder="例: お金がない、発売日前...">
+                <div class="modal-actions">
+                    <button onclick="document.getElementById('modal-reason').classList.add('hidden')"
+                        class="btn-flat">キャンセル</button>
+                    <button onclick="saveReason()" class="primary">保存</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Publisher Add Modal -->
         <div id="modal-publisher" class="modal hidden">
             <div class="modal-content">
@@ -808,7 +821,7 @@
         <!-- Modal: Settings -->
         <div id="modal-settings" class="modal hidden">
             <div class="modal-content">
-                <h3>設定 <span style="font-size:12px; color:red;">v35</span></h3>
+                <h3>設定 <span style="font-size:12px; color:red;">v36</span></h3>
 
                 <div class="input-group">
                     <label class="input-label">購入済みデータの自動削除</label>
