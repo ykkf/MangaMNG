@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Manga Manager Prototype</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icon.svg">
+    <meta name="theme-color" content="#6200ee">
+    <script>
+        // Emergency Inline Script for Settings & Manual Add
+        // This ensures these functions exist even if app.js fails to load or update immediately.
+
+        // --- Standalone State Management ---
+        function ensureState() {
+            if (!window.state) {
+                try {
+                    const raw = localStorage.getItem('manga_manager_data');
+                    if (raw) {
+                        window.state = JSON.parse(raw);
+                    } else {
+                        // Default Data
+                        window.state = {
+                            unpurchased: [],
+                            purchased: [],
+                            settings: { autoDeletePeriod: '30' },
+                            publishers: [
+                                { id: 'shueisha', name: '集英社', short: 'S', color: '#e50012' },
+                                { id: 'kodansha', name: '講談社', short: 'K', color: '#0097a7' },
+                                { id: 'shogakukan', name: '小学館', short: 'Sk', color: '#ffeb3b', textColor: 'black' },
+                                { id: 'kadokawa', name: 'KADOKAWA', short: 'Kd', color: '#1a237e' }
+                            ]
+                        };
+                        saveStateLocal();
+                    }
+                } catch (e) {
+                    window.state = { unpurchased: [], purchased: [], settings: {}, publishers: [] };
+                }
+            }
+            // Ensure arrays exist
+            if (!window.state.unpurchased) window.state.unpurchased = [];
+            if (!window.state.purchased) window.state.purchased = [];
+            if (!window.state.publishers || window.state.publishers.length === 0) {
+                window.state.publishers = [
+                    { id: 'shueisha', name: '集英社', short: 'S', color: '#e50012' },
+                    { id: 'kodansha', name: '講談社', short: 'K', color: '#0097a7' },
+                    { id: 'shogakukan', name: '小学館', short: 'Sk', color: '#ffeb3b', textColor: 'black' },
+                    { id: 'kadokawa', name: 'KADOKAWA', short: 'Kd', color: '#1a237e' }
+                ];
+            }
+        }
+
+        // --- Publisher Helpers ---
+        function generatePublisherOptions(selectedId) {
+            ensureState();
+            let html = window.state.publishers.map(p =>
+                `<option value="${p.id}" ${p.id === selectedId ? 'selected' : ''}>${p.name}</option>`
+            ).join('');
+            html += `<option value="other" ${selectedId === 'other' ? 'selected' : ''}>その他</option>`;
+            return html;
+        }
+
+        // --- Standalone Helper: Save ---
+        function saveStateLocal() {
+            if (window.saveState) {
+                window.saveState();
+            } else {
+                try {
+                    localStorage.setItem('manga_manager_data', JSON.stringify(window.state));
+                } catch (e) { console.error('Local Save Failed', e); }
+            }
+        }
+
+        // --- Standalone Helper: Render (FORCED) ---
+        function renderHomeLocal() {
+            console.log('Forcing Local Render');
+            // We do NOT delegate to window.renderHome anymore to ensure this works.
+
+            const list = document.getElementById('list-unpurchased');
+            if (!list) {
+                alert('Error: List element not found');
+                return;
+            }
+
+            list.innerHTML = '';
+            // Ensure state exists
+            if (!window.state || !window.state.unpurchased) {
+                list.innerHTML = '<div class="empty-state">データ読み込みエラー</div>';
+                return;
+            }
+
+            const items = window.state.unpurchased;
+
+            if (items.length === 0) {
+                list.innerHTML = '<div class="empty-state">未購入のマンガはありません (Local)</div>';
+            } else {
+                // Reverse to show newest first?
+                [...items].reverse().forEach(item => {
+                    const el = document.createElement('div');
+                    el.className = 'card';
+                    el.style.borderLeft = `4px solid ${getPubColor(item.publisher)}`;
+                    el.innerHTML = `
+                        <div class="card-info" onclick="openManualEditFallback('${item.id}')">
+                            <div class="card-title">
+                                <span style="font-size:12px; color:#666; margin-right:4px;">[${getPubShort(item.publisher)}]</span>
+                                ${item.title}
+                            </div>
+                            <span class="card-vol">${item.volume}巻</span>
+                        </div>
+                    `;
+                    list.appendChild(el);
+                });
+            }
+        }
+
+        function getPubColor(pubId) {
+            const map = { shueisha: '#e50012', kodansha: '#0097a7', shogakukan: '#ffeb3b', kadokawa: '#1a237e' };
+            return map[pubId] || '#9e9e9e';
+        }
+        function getPubShort(pubId) {
+            const map = { shueisha: 'S', kodansha: 'K', shogakukan: 'Sk', kadokawa: 'Kd' };
+            return map[pubId] || '?';
+        }
+
+        function openManualEditFallback(id) {
+            // Basic edit fallback
+            window.currentDetailId = id;
+            navigateToScreen('screen-detail-edit');
+            // Populate basics
+            ensureState();
+            const item = window.state.unpurchased.find(i => i.id === id);
+            if (item) {
+                document.getElementById('detail-title').value = item.title;
+                document.getElementById('detail-volume').value = item.volume;
+            }
+        }
+
+        function openManualAdd() {
+            ensureState();
+
+            // Reset Detail ID
+            if (window.appState) window.appState.currentDetailId = null;
+            window.currentDetailId = null;
+
+            // Reset Form
+            const titleInput = document.getElementById('detail-title');
+            const volInput = document.getElementById('detail-volume');
+            if (titleInput) titleInput.value = '';
+            if (volInput) volInput.value = '';
+
+            // Publisher Reset
+            const pubSelect = document.getElementById('detail-publisher');
+            if (pubSelect) {
+                pubSelect.innerHTML = generatePublisherOptions('other');
+                pubSelect.value = 'other';
+            }
+
+            // Adjust UI
+            const pTitle = document.getElementById('page-title');
+            if (pTitle) pTitle.textContent = 'マンガを手動追加';
+
+            const btnDel = document.getElementById('btn-delete-item');
+            if (btnDel) btnDel.classList.add('hidden');
+
+            const btnReason = document.getElementById('btn-detail-reason');
+            if (btnReason) btnReason.classList.add('hidden');
+
+            navigateToScreen('screen-detail-edit');
+        }
+
+        function closeDetailEdit() {
+            navigateToScreen('screen-home');
+        }
+
+        function saveDetailItem() {
+            ensureState(); // Ensure state exists
+
+            const titleInput = document.getElementById('detail-title');
+            const title = titleInput ? titleInput.value.trim() : '';
+
+            if (!title) {
+                alert('タイトルを入力してください');
+                return;
+            }
+
+            const volume = document.getElementById('detail-volume').value;
+            const publisher = document.getElementById('detail-publisher').value;
+
+            if (window.currentDetailId) {
+                // Update
+                let item = window.state.unpurchased.find(i => i.id === window.currentDetailId);
+                if (!item) item = window.state.purchased.find(i => i.id === window.currentDetailId);
+
+                if (item) {
+                    item.title = title;
+                    item.volume = volume;
+                    item.publisher = publisher;
+                    showToast('保存しました');
+                }
+            } else {
+                // Create New
+                const newItem = {
+                    id: Date.now().toString(),
+                    title: title,
+                    volume: volume,
+                    publisher: publisher,
+                    status: 'unpurchased',
+                    reason: null,
+                    updatedAt: Date.now()
+                };
+                window.state.unpurchased.unshift(newItem); // Add to top
+                showToast('追加しました(未購入)');
+            }
+
+            saveStateLocal();
+
+            // Clear Search/Filter
+            const sText = document.getElementById('search-text');
+            if (sText) sText.value = '';
+
+            renderHomeLocal(); // FORCE LOCAL RENDER
+
+            closeDetailEdit();
+        }
+
+        // Force Reset Function
+        function hardResetApp() {
+            if (!confirm('アプリを初期化して再読み込みしますか？(データは維持されます)')) return;
+
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                    for (let registration of registrations) {
+                        registration.unregister();
+                    }
+                    window.location.reload(true);
+                });
+            } else {
+                window.location.reload(true);
+            }
+        }
+
+        // Initial Render
+        window.addEventListener('load', () => { setTimeout(renderHomeLocal, 500); });
+
+        function navigateToScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            const target = document.getElementById(screenId);
+            if (target) target.classList.add('active');
+
+            const header = document.querySelector('header');
+            if (header) {
+                if (screenId === 'screen-edit') {
+                    header.classList.add('hidden');
+                } else {
+                    header.classList.remove('hidden');
+                }
+            }
+
+            const pTitle = document.getElementById('page-title');
+            if (screenId === 'screen-home' && pTitle) {
+                pTitle.textContent = 'Manga Manager';
+            }
+        }
+
+        function openSettings() {
+            const modal = document.getElementById('modal-settings');
+            if (modal) modal.classList.remove('hidden');
+
+            try {
+                const autoDelete = document.getElementById('setting-auto-delete');
+                if (autoDelete && window.state && window.state.settings) {
+                    autoDelete.value = window.state.settings.autoDeletePeriod || '30';
+                }
+                if (window.forceRenderPublishers) window.forceRenderPublishers();
+            } catch (e) { console.error(e); }
+        }
+
+        function closeSettings() {
+            document.getElementById('modal-settings').classList.add('hidden');
+        }
+
+        function saveSettings() {
+            try {
+                const autoDelete = document.getElementById('setting-auto-delete');
+                if (autoDelete && window.state && window.state.settings) {
+                    window.state.settings.autoDeletePeriod = autoDelete.value;
+                    saveStateLocal();
+                    if (window.checkAutoDelete) window.checkAutoDelete();
+                }
+                closeSettings();
+                showToast('設定を保存しました');
+            } catch (e) {
+                alert('エラー: 設定を保存できませんでした。アプリをリロードしてください。');
+            }
+        }
+
+        function deleteAllPurchased() {
+            if (!confirm('本当に全ての購入済みデータを削除しますか？')) return;
+            try {
+                ensureState();
+                window.state.purchased = [];
+                saveStateLocal();
+                renderHomeLocal();
+
+                closeSettings();
+                showToast('削除しました');
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.remove('hidden');
+            setTimeout(() => { toast.classList.add('hidden'); }, 3000);
+        }
+
+        // Service Worker Update Logic
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js').then(reg => {
+                reg.onupdatefound = () => {
+                    const installingWorker = reg.installing;
+                    installingWorker.onstatechange = () => {
+                        if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            window.location.reload();
+                        }
+                    };
+                };
+            });
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                window.location.reload();
+            });
+        }
+    </script>
+
+<body>
+
+    <!-- App Container -->
+    <div id="app">
+
+        <!-- Header -->
+        <header>
+            <h1 id="page-title">Manga Manager</h1>
+            <button id="btn-settings" class="icon-btn" style="margin-left: auto; margin-right: 8px;"
+                onclick="openSettings()">
+                <span class="material-icons">settings</span>
+            </button>
+            <button id="header-action-btn" class="icon-btn hidden">
+                <span class="material-icons">check</span>
+            </button>
+        </header>
+
+        <!-- Main Content -->
+        <main>
+            <!-- 1. Home Screen -->
+            <section id="screen-home" class="screen active">
+                <div class="tabs">
+                    <button class="tab active" data-tab="unpurchased">未購入</button>
+                    <button class="tab" data-tab="purchased">購入済</button>
+                </div>
+
+                <div class="search-container" style="padding: 8px 16px; background: #f5f5f5; display: flex; gap: 8px;">
+                    <input type="text" id="search-text" class="text-input" placeholder="タイトル検索..."
+                        style="flex: 2; font-size: 14px;">
+                    <select id="filter-publisher" class="text-input" style="flex: 1; font-size: 14px;">
+                        <option value="all">全出版社</option>
+                        <!-- Options injected by JS -->
+                    </select>
+                </div>
+
+                <div id="list-unpurchased" class="comic-list">
+                    <!-- Cards will be injected here -->
+                </div>
+
+                <div id="list-purchased" class="comic-list hidden">
+                    <!-- Cards will be injected here -->
+                </div>
+
+                <button id="fab-add-manual" class="fab"
+                    style="left: 24px; right: auto; background-color: white; color: var(--primary-color);"
+                    onclick="openManualAdd()">
+                    <span class="material-icons">edit</span>
+                </button>
+
+                <button id="fab-camera" class="fab">
+                    <span class="material-icons">camera_alt</span>
+                </button>
+            </section>
+
+            <!-- 2. Camera Screen -->
+            <section id="screen-camera" class="screen">
+                <div class="camera-view">
+                    <!-- Video for Real Camera -->
+                    <video id="camera-feed" autoplay playsinline
+                        style="position: absolute; width: 100%; height: 100%; object-fit: cover;"></video>
+
+                    <div class="camera-overlay">
+                        <div class="guide-frame"></div>
+                    </div>
+                </div>
+                <div class="camera-controls">
+                    <button id="btn-gallery" class="icon-btn">
+                        <span class="material-icons">photo_library</span>
+                    </button>
+                    <button id="btn-shutter" class="shutter-btn"></button>
+                    <button id="btn-close-camera" class="icon-btn">
+                        <span class="material-icons">close</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- 3. OCR Edit Screen -->
+            <section id="screen-edit" class="screen">
+                <div class="edit-header-controls"
+                    style="padding: 0 16px; height: 56px; display: flex; align-items: center; justify-content: space-between; background: var(--primary-color); color: white; position: sticky; top: 0; z-index: 10;">
+                    <button id="btn-cancel-edit" class="icon-btn">
+                        <span class="material-icons">close</span>
+                    </button>
+                    <span style="font-size: 20px; font-weight: 500;">読取結果確認</span>
+                    <button id="btn-save-edit" class="icon-btn">
+                        <span class="material-icons">check</span>
+                    </button>
+                </div>
+                <div id="ocr-list" class="edit-list">
+                    <!-- Editable Cards w/ AI suggestions injected here -->
+                </div>
+            </section>
+
+            <!-- 4. Detail Edit Screen (Single Item) -->
+            <section id="screen-detail-edit" class="screen">
+                <div class="edit-container">
+                    <div class="input-group">
+                        <label class="input-label">タイトル</label>
+                        <input type="text" id="detail-title" class="text-input">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">巻数</label>
+                        <input type="number" id="detail-volume" class="text-input" style="width: 80px;">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">出版社</label>
+                        <select id="detail-publisher" class="text-input">
+                            <option value="shueisha">集英社</option>
+                            <option value="kodansha">講談社</option>
+                            <option value="shogakukan">小学館</option>
+                            <option value="kadokawa">KADOKAWA</option>
+                            <option value="other">その他</option>
+                        </select>
+                    </div>
+
+                    <div class="edit-actions" style="margin-top: 32px;">
+                        <button id="btn-cancel-detail" class="btn-flat" style="margin-right: auto;"
+                            onclick="closeDetailEdit()">戻る</button>
+                        <button id="btn-delete-item" class="btn-flat text-danger"
+                            onclick="deleteDetailItem()">削除</button>
+                        <button id="btn-detail-reason" class="btn-flat text-primary"
+                            onclick="openDetailReasonModal()">未購入理由...</button>
+                        <button id="btn-save-detail" class="primary" style="margin-left: 8px;"
+                            onclick="saveDetailItem()">保存</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Publisher Add Modal -->
+        <div id="modal-publisher" class="modal hidden">
+            <div class="modal-content">
+                <h3 style="margin-bottom: 16px;">出版社を追加</h3>
+                <input type="text" id="new-publisher-name" class="text-input" placeholder="出版社名">
+                <div class="modal-actions">
+                    <button id="btn-close-pub-modal" class="btn-flat">キャンセル</button>
+                    <button id="btn-save-publisher" class="primary">追加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Settings -->
+        <div id="modal-settings" class="modal hidden">
+            <div class="modal-content">
+                <h3>設定</h3>
+
+                <div class="input-group">
+                    <label class="input-label">購入済みデータの自動削除</label>
+                    <select id="setting-auto-delete" class="text-input">
+                        <option value="never">削除しない</option>
+                        <option value="3">3日後</option>
+                        <option value="7">1週間後</option>
+                        <option value="30">1ヶ月後</option>
+                    </select>
+                </div>
+
+                <div class="input-group" style="margin-top: 20px;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <label class="input-label" style="margin-bottom: 0;">出版社管理</label>
+                        <button onclick="forceRenderPublishers()"
+                            style="background: none; border: none; color: var(--primary-color); font-size: 12px; cursor: pointer;">更新</button>
+                    </div>
+                    <div id="settings-publisher-list"
+                        style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; padding: 8px; border-radius: 4px; background: #fff;">
+                        <!-- Publishers injected here -->
+                    </div>
+                </div>
+
+                <div class="input-group" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+                    <button id="btn-delete-all-purchased" class="btn-flat text-danger"
+                        style="width: 100%; border: 1px solid #ff5252; margin-bottom: 12px;"
+                        onclick="deleteAllPurchased()">
+                        購入済みデータを全て削除
+                    </button>
+                    <button onclick="hardResetApp()" class="btn-flat"
+                        style="width: 100%; color: #666; font-size: 12px;">
+                        アプリを初期化 (リロード)
+                    </button>
+                </div>
+
+                <div class="modal-actions">
+                    <button id="btn-close-settings" onclick="closeSettings()">閉じる</button>
+                    <button id="btn-save-settings" class="primary" onclick="saveSettings()">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notification -->
+        <div id="toast" class="toast hidden">Message</div>
+
+    </div>
+
+    <!-- 
+         DISABLED APP.JS to resolve conflict. 
+         All logic is now inside index.html for stability. 
+         <script src="app.js"></script> 
+    -->
+</body>
+
+</html>
