@@ -118,7 +118,8 @@
 
         // --- Standalone Helper: Render (FORCED) ---
         function renderHomeLocal() {
-            console.log('Forcing Local Render v24');
+            ensureState(); // Ensure data is loaded
+            console.log('Forcing Local Render v33');
 
             // 1. Render Unpurchased
             const listUn = document.getElementById('list-unpurchased');
@@ -589,27 +590,63 @@
 
             setTimeout(() => {
                 if (btn) btn.style.backgroundColor = 'white';
-                stopCamera();
 
-                // MOCK OCR: Add a dummy item for now
-                ensureState();
-                const newItem = {
-                    id: Date.now().toString(),
-                    title: '撮影アイテム(仮)',
-                    volume: '1',
-                    publisher: window.state.publishers[0] ? window.state.publishers[0].id : 'shueisha',
-                    status: 'unpurchased',
-                    reason: null,
-                    updatedAt: Date.now()
-                };
-                window.state.unpurchased.unshift(newItem);
-                saveStateLocal();
-                renderHomeLocal();
-
-                showToast('スキャン完了: 撮影アイテム(仮)を追加しました');
-                navigateToScreen('screen-home');
+                if (videoStream) {
+                    stopCamera();
+                    // Mock OCR: use temporary current time as ID
+                    processCapturedImage('mock_image_data');
+                } else {
+                    // No stream, maybe clicked shutter without stream?
+                    // Try file input as fallback
+                    const fi = document.getElementById('camera-file-input');
+                    if (fi) fi.click();
+                }
             }, 500);
         }
+
+        function openGallery() {
+            const input = document.getElementById('camera-file-input');
+            if (input) {
+                input.removeAttribute('capture');
+                input.click();
+            }
+        }
+
+        function handleFileSelect(input) {
+            if (input.files && input.files[0]) {
+                showToast('画像を読み込みました (解析中...)');
+                setTimeout(() => {
+                    processCapturedImage('mock_file_data');
+                }, 1000);
+            }
+            input.value = '';
+        }
+
+        function processCapturedImage(imageData) {
+            ensureState();
+            const newItem = {
+                id: Date.now().toString(),
+                title: '撮影アイテム(仮)',
+                volume: '1',
+                publisher: window.state.publishers[0] ? window.state.publishers[0].id : 'shueisha',
+                status: 'unpurchased',
+                reason: null,
+                updatedAt: Date.now()
+            };
+            window.state.unpurchased.unshift(newItem);
+            saveStateLocal();
+            renderHomeLocal();
+
+            showToast('スキャン完了: 撮影アイテム(仮)を追加しました');
+            navigateToScreen('screen-home');
+        }
+
+        // Attach to window
+        window.openGallery = openGallery;
+        window.handleFileSelect = handleFileSelect;
+        window.takePicture = takePicture;
+        window.openCamera = openCamera;
+        window.closeCamera = closeCamera;
         // Service Worker Update Logic
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js').then(reg => {
@@ -632,6 +669,9 @@
 
     <!-- App Container -->
     <div id="app">
+        <!-- Hidden File Input for Gallery/Camera Fallback -->
+        <input type="file" id="camera-file-input" accept="image/*" style="display: none;"
+            onchange="handleFileSelect(this)">
 
         <!-- Header -->
         <header>
@@ -694,7 +734,7 @@
                     </div>
                 </div>
                 <div class="camera-controls">
-                    <button id="btn-gallery" class="icon-btn">
+                    <button id="btn-gallery" class="icon-btn" onclick="openGallery()">
                         <span class="material-icons">photo_library</span>
                     </button>
                     <button id="btn-shutter" class="shutter-btn" onclick="takePicture()"></button>
@@ -768,7 +808,7 @@
         <!-- Modal: Settings -->
         <div id="modal-settings" class="modal hidden">
             <div class="modal-content">
-                <h3>設定 <span style="font-size:12px; color:red;">v31</span></h3>
+                <h3>設定 <span style="font-size:12px; color:red;">v33</span></h3>
 
                 <div class="input-group">
                     <label class="input-label">購入済みデータの自動削除</label>
