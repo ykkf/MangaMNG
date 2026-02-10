@@ -99,6 +99,12 @@
             }
         }
 
+        // Expose helpers globally to prevent scope issues
+        window.getPubColor = getPubColor;
+        window.getPubShort = getPubShort;
+        window.generatePublisherOptions = generatePublisherOptions;
+        window.checkPublisherSelect = checkPublisherSelect;
+
         // --- Standalone Helper: Save ---
         function saveStateLocal() {
             if (window.saveState) {
@@ -762,7 +768,7 @@
         <!-- Modal: Settings -->
         <div id="modal-settings" class="modal hidden">
             <div class="modal-content">
-                <h3>設定</h3>
+                <h3>設定 <span style="font-size:12px; color:red;">v31</span></h3>
 
                 <div class="input-group">
                     <label class="input-label">購入済みデータの自動削除</label>

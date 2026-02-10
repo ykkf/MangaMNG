@@ -1,4 +1,4 @@
-const CACHE_NAME = 'manga-manager-v30-missing-funcs';
+const CACHE_NAME = 'manga-manager-v31-global-fix';
 const ASSETS = [
     './',
     './index.html',
