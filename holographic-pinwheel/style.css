@@ -315,6 +315,9 @@ main {
     align-items: center;
     justify-content: space-around;
     padding: 20px;
+    position: relative;
+    z-index: 50;
+    /* Ensure on top of video */
 }
 
 .shutter-btn {

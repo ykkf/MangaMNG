@@ -108,7 +108,9 @@
                 if (!window.state || !window.state.unpurchased || window.state.unpurchased.length === 0) {
                     listUn.innerHTML = '<div class="empty-state">未購入のマンガはありません</div>';
                 } else {
-                    [...window.state.unpurchased].reverse().forEach(item => {
+                    // Sort by updated desc (newest first)
+                    const sorted = [...window.state.unpurchased].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+                    sorted.forEach(item => {
                         listUn.appendChild(createCardLocal(item, 'unpurchased'));
                     });
                 }
@@ -310,6 +312,8 @@
                 const sText = document.getElementById('search-text');
                 if (sText) sText.value = '';
 
+                // Enable Unpurchased Tab to make sure user sees the item
+                toggleTab('unpurchased');
                 renderHomeLocal(); // FORCE LOCAL RENDER
 
                 closeDetailEdit();
