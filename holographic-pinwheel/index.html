@@ -78,54 +78,109 @@
 
         // --- Standalone Helper: Render (FORCED) ---
         function renderHomeLocal() {
-            console.log('Forcing Local Render');
-            // We do NOT delegate to window.renderHome anymore to ensure this works.
+            console.log('Forcing Local Render v24');
 
-            const list = document.getElementById('list-unpurchased');
-            if (!list) {
-                alert('Error: List element not found');
-                return;
+            // 1. Render Unpurchased
+            const listUn = document.getElementById('list-unpurchased');
+            if (listUn) {
+                listUn.innerHTML = '';
+                if (!window.state || !window.state.unpurchased || window.state.unpurchased.length === 0) {
+                    listUn.innerHTML = '<div class="empty-state">未購入のマンガはありません</div>';
+                } else {
+                    [...window.state.unpurchased].reverse().forEach(item => {
+                        listUn.appendChild(createCardLocal(item, 'unpurchased'));
+                    });
+                }
             }
 
-            list.innerHTML = '';
-            // Ensure state exists
-            if (!window.state || !window.state.unpurchased) {
-                list.innerHTML = '<div class="empty-state">データ読み込みエラー</div>';
-                return;
+            // 2. Render Purchased
+            const listPur = document.getElementById('list-purchased');
+            if (listPur) {
+                listPur.innerHTML = '';
+                if (!window.state || !window.state.purchased || window.state.purchased.length === 0) {
+                    listPur.innerHTML = '<div class="empty-state">購入済みのマンガはありません</div>';
+                } else {
+                    // Sort by updated time desc
+                    const sorted = [...window.state.purchased].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+                    sorted.forEach(item => {
+                        listPur.appendChild(createCardLocal(item, 'purchased'));
+                    });
+                }
             }
+        }
 
-            const items = window.state.unpurchased;
+        function createCardLocal(item, status) {
+            const el = document.createElement('div');
+            el.className = 'card';
+            el.style.borderLeft = `4px solid ${getPubColor(item.publisher)}`;
 
-            if (items.length === 0) {
-                list.innerHTML = '<div class="empty-state">未購入のマンガはありません (Local)</div>';
+            const isPurchased = status === 'purchased';
+            const checkIcon = isPurchased ? 'check' : '';
+            const checkClass = isPurchased ? 'checked' : '';
+
+            // Checkbox HTML
+            // We use onclick="event.stopPropagation(); toggleStatusLocal(...)" to avoid triggering card edit
+            const checkboxHtml = `
+                <div class="checkbox ${checkClass}" onclick="event.stopPropagation(); toggleStatusLocal('${item.id}', '${status}')">
+                    ${isPurchased ? '<span class="material-icons" style="font-size:16px; color:white;">check</span>' : ''}
+                </div>
+            `;
+
+            el.innerHTML = `
+                <div class="card-info" onclick="openManualEditFallback('${item.id}')">
+                    <div class="card-title">
+                        <span style="font-size:12px; color:#666; margin-right:4px;">[${getPubShort(item.publisher)}]</span>
+                        ${item.title}
+                    </div>
+                    <span class="card-vol">${item.volume}巻</span>
+                </div>
+                <div class="card-actions">
+                    ${checkboxHtml}
+                </div>
+            `;
+            return el;
+        }
+
+        function toggleStatusLocal(id, currentStatus) {
+            ensureState();
+            const sourceList = currentStatus === 'unpurchased' ? window.state.unpurchased : window.state.purchased;
+            const targetList = currentStatus === 'unpurchased' ? window.state.purchased : window.state.unpurchased;
+
+            const idx = sourceList.findIndex(x => x.id === id);
+            if (idx > -1) {
+                const item = sourceList.splice(idx, 1)[0];
+                item.status = currentStatus === 'unpurchased' ? 'purchased' : 'unpurchased';
+                item.updatedAt = Date.now();
+
+                // Add to TOP of target list
+                targetList.unshift(item);
+
+                saveStateLocal();
+                renderHomeLocal();
+                showToast(item.status === 'purchased' ? '購入済みにしました' : '未購入に戻しました');
+            }
+        }
+
+        function toggleTab(tabName) {
+            // Update Tab Buttons
+            document.querySelectorAll('.tab').forEach(t => {
+                if (t.dataset.tab === tabName) t.classList.add('active');
+                else t.classList.remove('active');
+            });
+
+            // Update Lists
+            const listUn = document.getElementById('list-unpurchased');
+            const listPur = document.getElementById('list-purchased');
+
+            if (tabName === 'unpurchased') {
+                if (listUn) listUn.classList.remove('hidden');
+                if (listPur) listPur.classList.add('hidden');
             } else {
-                // Reverse to show newest first?
-                [...items].reverse().forEach(item => {
-                    const el = document.createElement('div');
-                    el.className = 'card';
-                    el.style.borderLeft = `4px solid ${getPubColor(item.publisher)}`;
-                    el.innerHTML = `
-                        <div class="card-info" onclick="openManualEditFallback('${item.id}')">
-                            <div class="card-title">
-                                <span style="font-size:12px; color:#666; margin-right:4px;">[${getPubShort(item.publisher)}]</span>
-                                ${item.title}
-                            </div>
-                            <span class="card-vol">${item.volume}巻</span>
-                        </div>
-                    `;
-                    list.appendChild(el);
-                });
+                if (listUn) listUn.classList.add('hidden');
+                if (listPur) listPur.classList.remove('hidden');
             }
         }
 
-        function getPubColor(pubId) {
-            const map = { shueisha: '#e50012', kodansha: '#0097a7', shogakukan: '#ffeb3b', kadokawa: '#1a237e' };
-            return map[pubId] || '#9e9e9e';
-        }
-        function getPubShort(pubId) {
-            const map = { shueisha: 'S', kodansha: 'K', shogakukan: 'Sk', kadokawa: 'Kd' };
-            return map[pubId] || '?';
-        }
 
         function openManualEditFallback(id) {
             // Basic edit fallback
@@ -361,8 +416,8 @@
             <!-- 1. Home Screen -->
             <section id="screen-home" class="screen active">
                 <div class="tabs">
-                    <button class="tab active" data-tab="unpurchased">未購入</button>
-                    <button class="tab" data-tab="purchased">購入済</button>
+                    <button class="tab active" data-tab="unpurchased" onclick="toggleTab('unpurchased')">未購入</button>
+                    <button class="tab" data-tab="purchased" onclick="toggleTab('purchased')">購入済</button>
                 </div>
 
                 <div class="search-container" style="padding: 8px 16px; background: #f5f5f5; display: flex; gap: 8px;">
