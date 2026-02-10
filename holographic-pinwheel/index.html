@@ -58,10 +58,14 @@
         // --- Publisher Helpers ---
         function generatePublisherOptions(selectedId) {
             ensureState();
+            // Defaults to first publisher if no selection
+            const defaultId = (window.state.publishers[0] && window.state.publishers[0].id) || '';
+            const targetId = selectedId === 'other' || !selectedId ? defaultId : selectedId;
+
             let html = window.state.publishers.map(p =>
-                `<option value="${p.id}" ${p.id === selectedId ? 'selected' : ''}>${p.name}</option>`
+                `<option value="${p.id}" ${p.id === targetId ? 'selected' : ''}>${p.name}</option>`
             ).join('');
-            html += `<option value="other" ${selectedId === 'other' ? 'selected' : ''}>その他</option>`;
+            // REMOVED 'other' option as requested
             return html;
         }
 
@@ -210,9 +214,10 @@
 
             // Publisher Reset
             const pubSelect = document.getElementById('detail-publisher');
-            if (pubSelect) {
-                pubSelect.innerHTML = generatePublisherOptions('other');
-                pubSelect.value = 'other';
+            if (pubSelect && window.state.publishers.length > 0) {
+                const defaultPub = window.state.publishers[0].id; // Default to first (e.g., Shueisha)
+                pubSelect.innerHTML = generatePublisherOptions(defaultPub);
+                pubSelect.value = defaultPub;
             }
 
             // Adjust UI
@@ -244,7 +249,12 @@
             }
 
             const volume = document.getElementById('detail-volume').value;
-            const publisher = document.getElementById('detail-publisher').value;
+            let publisher = document.getElementById('detail-publisher').value;
+
+            // Fallback if empty (should not happen with new default logic, but for safety)
+            if (!publisher && window.state.publishers.length > 0) {
+                publisher = window.state.publishers[0].id;
+            }
 
             if (window.currentDetailId) {
                 // Update
