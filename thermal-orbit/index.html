@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <link rel="stylesheet" href="style.css">
+    <!-- Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icon.svg">
+    <meta name="theme-color" content="#6200ee">
+
+    <script>
+        // Emergency Inline Script for Settings & Manual Add
+        // This ensures these functions exist even if app.js fails to load or update immediately.
+
+        // --- Standalone State Management ---
+        function ensureState() {
+            if (!window.state) {
+                try {
+                    const raw = localStorage.getItem('manga_manager_data');
+                    if (raw) {
+                        window.state = JSON.parse(raw);
+                    } else {
+                        // Default Data
+                        window.state = {
+                            unpurchased: [],
+                            purchased: [],
+                            settings: { autoDeletePeriod: '30' },
+                            publishers: [
+                                { id: 'shueisha', name: '集英社', short: 'S', color: '#e50012' },
+                                { id: 'kodansha', name: '講談社', short: 'K', color: '#0097a7' },
+                                { id: 'shogakukan', name: '小学館', short: 'Sk', color: '#ffeb3b', textColor: 'black' },
+                                { id: 'kadokawa', name: 'KADOKAWA', short: 'Kd', color: '#1a237e' }
+                            ]
+
+                        };
+                        window.state.authors = []; // Default empty
+                        saveStateLocal();
+                    }
+                } catch (e) {
+                    window.state = { unpurchased: [], purchased: [], settings: {}, publishers: [], authors: [] };
+                }
+            }
+            // Ensure arrays exist
+            if (!window.state.unpurchased) window.state.unpurchased = [];
+            if (!window.state.purchased) window.state.purchased = [];
+            if (!window.state.authors) window.state.authors = []; // Ensure authors array
+            if (!window.state.publishers || window.state.publishers.length === 0) {
+                window.state.publishers = [
+                    { id: 'shueisha', name: '集英社', short: 'S', color: '#e50012' },
+                    { id: 'kodansha', name: '講談社', short: 'K', color: '#0097a7' },
+                    { id: 'shogakukan', name: '小学館', short: 'Sk', color: '#ffeb3b', textColor: 'black' },
+                    { id: 'kadokawa', name: 'KADOKAWA', short: 'Kd', color: '#1a237e' }
+                ];
+            }
+        }
+
+        // --- Publisher Helpers ---
+        // --- Publisher Helpers ---
+        function getPubColor(pubId) {
+            ensureState();
+            const pub = window.state.publishers.find(p => p.id === pubId);
+            return pub ? pub.color : '#9e9e9e';
+        }
+
+        function getPubShort(pubId) {
+            ensureState();
+            const pub = window.state.publishers.find(p => p.id === pubId);
+            return pub ? pub.short : '?';
+        }
+
+        // --- Publisher Helpers ---
+        function generatePublisherOptions(selectedId) {
+            ensureState();
+            // Defaults to first publisher if no selection, unless it's "add-new"
+            const defaultId = (window.state.publishers[0] && window.state.publishers[0].id) || '';
+            let targetId = selectedId;
+            if (!targetId || targetId === 'other') targetId = defaultId;
+
+            let html = window.state.publishers.map(p =>
+                `<option value="${p.id}" ${p.id === targetId ? 'selected' : ''}>${p.name}</option>`
+            ).join('');
+
+            // ADD 'Add New' option
+            html += `<option value="add-new">+ 出版社を追加...</option>`;
+            return html;
+        }
+
+        function checkPublisherSelect(selectEl) {
+            if (selectEl.value === 'add-new') {
+                // Determine which screen we are in to know where to return or how to update
+                // For now, we update all selectors after adding.
+                window.publisherSelectTarget = selectEl;
+                openPublisherModal();
+                // Temporarily reset to index 0 to avoid sticking on "add-new" visually if cancelled
+                if (window.state.publishers.length > 0) {
+                    selectEl.value = window.state.publishers[0].id;
+                }
+            }
+        }
+
+        // --- Author Helpers ---
+        function generateAuthorOptions(selectedName) {
+            ensureState();
+            let html = '<option value="">(未設定)</option>';
+            window.state.authors.forEach(a => {
+                const isSel = a.name === selectedName ? 'selected' : '';
+                html += `<option value="${a.name}" ${isSel}>${a.name}</option>`;
+            });
+            html += `<option value="add-new">+ 作者を追加...</option>`;
+            return html;
+        }
+
+        function checkAuthorSelect(selectEl) {
+            if (selectEl.value === 'add-new') {
+                window.authorSelectTarget = selectEl;
+                openAuthorModal();
+                selectEl.value = ''; // Reset temporarily
+            }
+        }
+
+        window.generateAuthorOptions = generateAuthorOptions;
+        window.checkAuthorSelect = checkAuthorSelect;
+
+        // Expose helpers globally to prevent scope issues
+        window.getPubColor = getPubColor;
+        window.getPubShort = getPubShort;
+        window.generatePublisherOptions = generatePublisherOptions;
+        window.checkPublisherSelect = checkPublisherSelect;
+
+        // --- Standalone Helper: Save ---
+        function saveStateLocal() {
+            if (window.saveState) {
+                window.saveState();
+            } else {
+                try {
+                    localStorage.setItem('manga_manager_data', JSON.stringify(window.state));
+                } catch (e) { console.error('Local Save Failed', e); }
+            }
+        }
+
+        // --- Standalone Helper: Render (FORCED) ---
+        function renderHomeLocal() {
+            ensureState(); // Ensure data is loaded
+            console.log('Forcing Local Render v34');
+
+            // Get search/filter values
+            const searchInput = document.getElementById('search-text');
+            const filterPub = document.getElementById('filter-publisher');
+            const searchText = searchInput ? searchInput.value.trim().toLowerCase() : '';
+            const filterPubVal = filterPub ? filterPub.value : 'all';
+
+            // Filter function
+            function matchesFilter(item) {
+                let matches = true;
+                if (searchText) {
+                    matches = item.title.toLowerCase().includes(searchText) ||
+                        (item.author && item.author.toLowerCase().includes(searchText));
+                }
+                if (matches && filterPubVal !== 'all') {
+                    matches = item.publisher === filterPubVal;
+                }
+                return matches;
+            }
+
+            // 1. Render Unpurchased
+            const listUn = document.getElementById('list-unpurchased');
+            if (listUn) {
+                listUn.innerHTML = '';
+                if (!window.state || !window.state.unpurchased || window.state.unpurchased.length === 0) {
+                    listUn.innerHTML = '<div class="empty-state">未購入のマンガはありません</div>';
+                } else {
+                    const sorted = [...window.state.unpurchased].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+                    const filtered = sorted.filter(matchesFilter);
+                    if (filtered.length === 0) {
+                        listUn.innerHTML = '<div class="empty-state">該当するマンガが見つかりません</div>';
+                    } else {
+                        filtered.forEach(item => {
+                            listUn.appendChild(createCardLocal(item, 'unpurchased'));
+                        });
+                    }
+                }
+            }
+
+            // 2. Render Purchased
+            const listPur = document.getElementById('list-purchased');
+            if (listPur) {
+                listPur.innerHTML = '';
+                if (!window.state || !window.state.purchased || window.state.purchased.length === 0) {
+                    listPur.innerHTML = '<div class="empty-state">購入済みのマンガはありません</div>';
+                } else {
+                    const sorted = [...window.state.purchased].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+                    const filtered = sorted.filter(matchesFilter);
+                    if (filtered.length === 0) {
+                        listPur.innerHTML = '<div class="empty-state">該当するマンガが見つかりません</div>';
+                    } else {
+                        filtered.forEach(item => {
+                            listPur.appendChild(createCardLocal(item, 'purchased'));
+                        });
+                    }
+                }
+            }
+
+            // 3. Update publisher filter options (keep current selection)
+            updatePublisherFilter();
+        }
+
+        function updatePublisherFilter() {
+            const filterPub = document.getElementById('filter-publisher');
+            if (!filterPub || !window.state || !window.state.publishers) return;
+            const currentVal = filterPub.value;
+            let html = '<option value="all">全出版社</option>';
+            window.state.publishers.forEach(p => {
+                html += `<option value="${p.id}">${p.name}</option>`;
+            });
+            filterPub.innerHTML = html;
+            filterPub.value = currentVal; // Restore selection
+        }
+        window.updatePublisherFilter = updatePublisherFilter;
+
+        function createCardLocal(item, status) {
+            const el = document.createElement('div');
+            el.className = 'card';
+            el.style.borderLeft = `4px solid ${getPubColor(item.publisher)}`;
+
+            const isPurchased = status === 'purchased';
+            const checkIcon = isPurchased ? 'check' : '';
+            const checkClass = isPurchased ? 'checked' : '';
+
+            // Checkbox HTML
+            // We use onclick="event.stopPropagation(); toggleStatusLocal(...)" to avoid triggering card edit
+            const checkboxHtml = `
+                <div class="checkbox ${checkClass}" onclick="event.stopPropagation(); toggleStatusLocal('${item.id}', '${status}')">
+                    ${isPurchased ? '<span class="material-icons" style="font-size:16px; color:white;">check</span>' : ''}
+                </div>
+            `;
+
+            // Reason tag (show on unpurchased items with a reason)
+
+
+            // Find publisher name
+            const pubObj = window.state.publishers.find(p => p.id === item.publisher);
+            const pubName = pubObj ? pubObj.name : '?';
+
+            el.innerHTML = `
+                <div class="card-info" onclick="openManualEditFallback('${item.id}')">
+                    <div class="card-title">
+                        <span style="font-size:12px; color:#666; margin-right:4px;">[${pubName}]</span>
+                        ${item.title}
+                    </div>
+                    <div style="font-size:10px; color:#888; margin-left: 4px;">${item.author || ''}</div>
+                    <div style="display:flex; align-items:center;">
+                        ${item.volume ? '<span class="card-vol">' + item.volume + '巻</span>' : ''}
+                    </div>
+                </div>
+                <div class="card-actions">
+                    ${checkboxHtml}
+                </div>
+            `;
+            return el;
+        }
+
+        function toggleStatusLocal(id, currentStatus) {
+            ensureState();
+            const sourceList = currentStatus === 'unpurchased' ? window.state.unpurchased : window.state.purchased;
+            const targetList = currentStatus === 'unpurchased' ? window.state.purchased : window.state.unpurchased;
+
+            const idx = sourceList.findIndex(x => x.id === id);
+            if (idx > -1) {
+                const item = sourceList.splice(idx, 1)[0];
+                item.status = currentStatus === 'unpurchased' ? 'purchased' : 'unpurchased';
+                item.updatedAt = Date.now();
+
+                // Add to TOP of target list
+                targetList.unshift(item);
+
+                saveStateLocal();
+                renderHomeLocal();
+                showToast(item.status === 'purchased' ? '購入済みにしました' : '未購入に戻しました');
+            }
+        }
+
+        function toggleTab(tabName) {
+            // Update Tab Buttons
+            document.querySelectorAll('.tab').forEach(t => {
+                if (t.dataset.tab === tabName) t.classList.add('active');
+                else t.classList.remove('active');
+            });
+
+            // Update Lists
+            const listUn = document.getElementById('list-unpurchased');
+            const listPur = document.getElementById('list-purchased');
+
+            if (tabName === 'unpurchased') {
+                if (listUn) listUn.classList.remove('hidden');
+                if (listPur) listPur.classList.add('hidden');
+            } else {
+                if (listUn) listUn.classList.add('hidden');
+                if (listPur) listPur.classList.remove('hidden');
+            }
+        }
+
+
+        function openManualEditFallback(id) {
+            // Basic edit fallback
+            window.currentDetailId = id;
+            navigateToScreen('screen-add');
+
+            // Show buttons that might have been hidden by Manual Add
+            const btnDel = document.getElementById('btn-delete-item');
+            if (btnDel) btnDel.classList.remove('hidden');
+
+
+
+            // Populate basics
+            ensureState();
+            let item = window.state.unpurchased.find(i => i.id === id);
+            if (!item) item = window.state.purchased.find(i => i.id === id);
+            if (item) {
+                document.getElementById('detail-title').value = item.title;
+                document.getElementById('detail-volume').value = item.volume;
+
+                // Populate Author
+                const authorSelect = document.getElementById('detail-author');
+                if (authorSelect) {
+                    authorSelect.innerHTML = generateAuthorOptions(item.author);
+                    authorSelect.value = item.author || '';
+                }
+
+                // Populate publisher dropdown
+                const pubSelect = document.getElementById('detail-publisher');
+                if (pubSelect) {
+                    pubSelect.innerHTML = generatePublisherOptions(item.publisher);
+                    pubSelect.value = item.publisher;
+                }
+            }
+
+            // Update page title
+            const pTitle = document.getElementById('page-title');
+            if (pTitle) pTitle.textContent = 'マンガを編集';
+        }
+
+        function openManualAdd() {
+            ensureState();
+
+            // Reset Detail ID
+            if (window.appState) window.appState.currentDetailId = null;
+            window.currentDetailId = null;
+
+            // Reset Form
+            const titleInput = document.getElementById('detail-title');
+            const volInput = document.getElementById('detail-volume');
+            const authorInput = document.getElementById('detail-author'); // Select
+            if (titleInput) titleInput.value = '';
+            if (volInput) volInput.value = '';
+
+            if (authorInput) {
+                authorInput.innerHTML = generateAuthorOptions('');
+                authorInput.value = '';
+            }
+
+            // Publisher Reset
+            const pubSelect = document.getElementById('detail-publisher');
+            if (pubSelect && window.state.publishers.length > 0) {
+                const defaultPub = window.state.publishers[0].id; // Default to first (e.g., Shueisha)
+                pubSelect.innerHTML = generatePublisherOptions(defaultPub);
+                pubSelect.value = defaultPub;
+            }
+
+            // Adjust UI
+            const pTitle = document.getElementById('page-title');
+            if (pTitle) pTitle.textContent = 'マンガを手動追加';
+
+            const btnDel = document.getElementById('btn-delete-item');
+            if (btnDel) btnDel.classList.add('hidden');
+
+
+
+            navigateToScreen('screen-add');
+        }
+
+        function closeDetailEdit() {
+            navigateToScreen('screen-home');
+        }
+
+        function saveDetailItem() {
+            try {
+                ensureState(); // Ensure state exists
+
+                const titleInput = document.getElementById('detail-title');
+                const title = titleInput ? titleInput.value.trim() : '';
+
+                if (!title) {
+                    alert('タイトルを入力してください');
+                    return;
+                }
+
+                const volume = document.getElementById('detail-volume').value;
+                const author = document.getElementById('detail-author').value;
+                let publisher = document.getElementById('detail-publisher').value;
+
+                // Handle "add-new" being selected by accident or bug
+                if (publisher === 'add-new' || !publisher) {
+                    if (window.state.publishers.length > 0) {
+                        publisher = window.state.publishers[0].id;
+                    } else {
+                        publisher = 'shueisha'; // Fallback
+                    }
+                }
+
+                if (window.currentDetailId) {
+                    // Update
+                    let item = window.state.unpurchased.find(i => i.id === window.currentDetailId);
+                    if (!item) item = window.state.purchased.find(i => i.id === window.currentDetailId);
+
+                    if (item) {
+                        item.title = title;
+                        item.volume = volume;
+                        item.author = author;
+                        item.publisher = publisher;
+                        showToast('保存しました');
+                    }
+                } else {
+                    // Create New
+                    const newItem = {
+                        id: Date.now().toString(),
+                        title: title,
+                        volume: volume,
+                        author: author,
+                        publisher: publisher,
+                        status: 'unpurchased',
+                        updatedAt: Date.now()
+                    };
+                    window.state.unpurchased.unshift(newItem); // Add to top
+                    // Reset temp reason
+
+                    showToast('追加しました(未購入)');
+                }
+
+                saveStateLocal();
+
+                // Clear Search/Filter
+                const sText = document.getElementById('search-text');
+                if (sText) sText.value = '';
+
+                // Enable Unpurchased Tab to make sure user sees the item
+                toggleTab('unpurchased');
+                renderHomeLocal(); // FORCE LOCAL RENDER
+
+                closeDetailEdit();
+            } catch (e) {
+                console.error(e);
+                alert('エラーが発生しました: ' + e.message);
+            }
+        }
+
+        // Force Reset Function
+        function hardResetApp() {
+            if (!confirm('アプリを初期化して再読み込みしますか？(データは維持されます)')) return;
+
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                    for (let registration of registrations) {
+                        registration.unregister();
+                    }
+                    window.location.reload(true);
+                });
+            } else {
+                window.location.reload(true);
+            }
+        }
+
+        // Initial Render + Search/Filter Event Listeners
+        window.addEventListener('load', () => {
+            setTimeout(renderHomeLocal, 500);
+
+            // Attach search event listeners
+            const searchInput = document.getElementById('search-text');
+            if (searchInput) {
+                searchInput.addEventListener('input', renderHomeLocal);
+            }
+            const filterPub = document.getElementById('filter-publisher');
+            if (filterPub) {
+                filterPub.addEventListener('change', renderHomeLocal);
+            }
+        });
+
+        function navigateToScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            const target = document.getElementById(screenId);
+            if (target) target.classList.add('active');
+
+            const header = document.querySelector('header');
+            if (header) {
+                if (screenId === 'screen-edit') {
+                    header.classList.add('hidden');
+                } else {
+                    header.classList.remove('hidden');
+                }
+            }
+
+            const pTitle = document.getElementById('page-title');
+            if (screenId === 'screen-home' && pTitle) {
+                pTitle.textContent = 'Book Manager';
+            }
+        }
+
+        function openSettings() {
+            const modal = document.getElementById('modal-settings');
+            if (modal) modal.classList.remove('hidden');
+
+            try {
+                const autoDelete = document.getElementById('setting-auto-delete');
+                if (autoDelete && window.state && window.state.settings) {
+                    autoDelete.value = window.state.settings.autoDeletePeriod || '30';
+                }
+                if (window.forceRenderPublishers) window.forceRenderPublishers();
+                if (window.forceRenderAuthors) window.forceRenderAuthors();
+            } catch (e) { console.error(e); }
+        }
+
+        function closeSettings() {
+            document.getElementById('modal-settings').classList.add('hidden');
+        }
+
+        function saveSettings() {
+            try {
+                const autoDelete = document.getElementById('setting-auto-delete');
+                if (autoDelete && window.state && window.state.settings) {
+                    window.state.settings.autoDeletePeriod = autoDelete.value;
+                    saveStateLocal();
+                    if (window.checkAutoDelete) window.checkAutoDelete();
+                }
+                closeSettings();
+                showToast('設定を保存しました');
+            } catch (e) {
+                alert('エラー: 設定を保存できませんでした。アプリをリロードしてください。');
+            }
+        }
+
+        // --- Publisher Management Helpers ---
+        function forceRenderPublishers() {
+            ensureState();
+            const container = document.getElementById('settings-publisher-list');
+            if (!container) return;
+
+            container.innerHTML = '';
+            window.state.publishers.forEach((p, index) => {
+                // Don't allow deleting the default 4 if you want to protect them, or allow all.
+                // Let's allow deleting custom ones, but maybe protect the big 4? 
+                // For now, simple implementation:
+                const div = document.createElement('div');
+                div.style.display = 'flex';
+                div.style.justifyContent = 'space-between';
+                div.style.padding = '4px';
+                div.style.borderBottom = '1px solid #eee';
+
+                div.innerHTML = `
+                    <span>${p.name}</span>
+                    <button onclick="deletePublisher('${p.id}')" style="color:red; border:none; background:none;">×</button>
+                 `;
+                container.appendChild(div);
+            });
+
+            // Add "Add" button at bottom
+            const addBtn = document.createElement('div');
+            addBtn.innerHTML = `<button onclick="openPublisherModal()" style="width:100%; margin-top:8px; color:var(--primary-color); border:1px dashed var(--primary-color); background:none; padding:4px;">+ 追加</button>`;
+            container.appendChild(addBtn);
+        }
+
+        function deletePublisher(id) {
+            if (!confirm('この出版社を削除しますか？')) return;
+            ensureState();
+            const idx = window.state.publishers.findIndex(p => p.id === id);
+            if (idx > -1) {
+                window.state.publishers.splice(idx, 1);
+                saveStateLocal();
+                forceRenderPublishers();
+                // Refresh dropdown in Filter
+                const fPub = document.getElementById('filter-publisher');
+                if (fPub) {
+                    const currentVal = fPub.value;
+                    let html = '<option value="all">全出版社</option>';
+                    html += window.state.publishers.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+                    fPub.innerHTML = html;
+                    fPub.value = currentVal;
+                }
+            }
+        }
+
+        function openPublisherModal() {
+            const m = document.getElementById('modal-publisher');
+            if (m) m.classList.remove('hidden');
+        }
+
+        // CRITICAL: Wrap DOM access in load handler (script is in <head>, DOM not ready)
+        window.addEventListener('load', function () {
+            var closeBtn = document.getElementById('btn-close-pub-modal');
+            if (closeBtn) {
+                closeBtn.onclick = function () {
+                    document.getElementById('modal-publisher').classList.add('hidden');
+                };
+            }
+
+            var saveBtn = document.getElementById('btn-save-publisher');
+            if (saveBtn) {
+                saveBtn.onclick = function () {
+                    var nameInput = document.getElementById('new-publisher-name');
+                    var name = nameInput.value.trim();
+                    if (!name) return;
+
+                    ensureState();
+                    var newId = 'pub_' + Date.now();
+                    window.state.publishers.push({
+                        id: newId,
+                        name: name,
+                        short: name.substring(0, 2),
+                        color: '#888888'
+                    });
+
+                    saveStateLocal();
+                    nameInput.value = '';
+                    document.getElementById('modal-publisher').classList.add('hidden');
+                    forceRenderPublishers();
+
+                    if (window.publisherSelectTarget) {
+                        window.publisherSelectTarget.innerHTML = generatePublisherOptions(newId);
+                        window.publisherSelectTarget.value = newId;
+                        window.publisherSelectTarget = null;
+                    } else {
+                        var manualSelect = document.getElementById('detail-publisher');
+                        if (manualSelect) {
+                            var curr = manualSelect.value;
+                            manualSelect.innerHTML = generatePublisherOptions(curr);
+                            manualSelect.value = curr;
+                        }
+                    }
+                    showToast('出版社を追加しました');
+                    updatePublisherFilter(); // Fix: Ensure filter is updated immediately
+                };
+            }
+        });
+
+        // --- Author Management ---
+        function forceRenderAuthors() {
+            ensureState();
+            const container = document.getElementById('settings-author-list');
+            if (!container) return;
+            container.innerHTML = '';
+            window.state.authors.forEach((a, index) => {
+                const div = document.createElement('div');
+                div.style.display = 'flex';
+                div.style.justifyContent = 'space-between';
+                div.style.padding = '4px';
+                div.style.borderBottom = '1px solid #eee';
+                div.innerHTML = `
+                    <span>${a.name}</span>
+                    <button onclick="deleteAuthor('${a.name}')" style="color:red; border:none; background:none;">×</button>
+                `;
+                container.appendChild(div);
+            });
+            // Add "Add" button at bottom
+            const addBtn = document.createElement('div');
+            addBtn.innerHTML = `<button onclick="openAuthorModal()" style="width:100%; margin-top:8px; color:var(--primary-color); border:1px dashed var(--primary-color); background:none; padding:4px;">+ 追加</button>`;
+            container.appendChild(addBtn);
+        }
+
+        function deleteAuthor(name) {
+            if (!confirm('この作者を削除しますか？')) return;
+            ensureState();
+            const idx = window.state.authors.findIndex(a => a.name === name);
+            if (idx > -1) {
+                window.state.authors.splice(idx, 1);
+                saveStateLocal();
+                forceRenderAuthors();
+            }
+        }
+        window.deleteAuthor = deleteAuthor;
+
+        function openAuthorModal() {
+            const m = document.getElementById('modal-author');
+            if (m) m.classList.remove('hidden');
+        }
+        window.openAuthorModal = openAuthorModal;
+
+        window.addEventListener('load', function () {
+            // Author Modal Logic
+            var closeBtn = document.getElementById('btn-close-auth-modal');
+            if (closeBtn) {
+                closeBtn.onclick = function () {
+                    document.getElementById('modal-author').classList.add('hidden');
+                };
+            }
+            var saveBtn = document.getElementById('btn-save-author');
+            if (saveBtn) {
+                saveBtn.onclick = function () {
+                    var nameInput = document.getElementById('new-author-name');
+                    var name = nameInput.value.trim();
+                    if (!name) return;
+                    ensureState();
+                    // Check duplicate
+                    if (!window.state.authors.find(a => a.name === name)) {
+                        window.state.authors.push({ name: name });
+                        saveStateLocal();
+                    }
+                    nameInput.value = '';
+                    document.getElementById('modal-author').classList.add('hidden');
+                    forceRenderAuthors();
+
+                    // Refresh dropdowns if active
+                    if (window.authorSelectTarget) {
+                        window.authorSelectTarget.innerHTML = generateAuthorOptions(name);
+                        window.authorSelectTarget.value = name; // Select new
+                        window.authorSelectTarget = null;
+                    } else {
+                        // Refresh manual add dropdown
+                        const manualSel = document.getElementById('detail-author');
+                        if (manualSel) {
+                            const curr = manualSel.value;
+                            manualSel.innerHTML = generateAuthorOptions(curr);
+                            manualSel.value = name; // Auto select new
+                        }
+                    }
+                    showToast('作者を追加しました');
+                };
+            }
+        });
+
+        function deleteAllPurchased() {
+            if (!confirm('本当に全ての購入済みデータを削除しますか？')) return;
+            try {
+                ensureState();
+                window.state.purchased = [];
+                saveStateLocal();
+                renderHomeLocal();
+
+                closeSettings();
+                showToast('削除しました');
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.remove('hidden');
+            setTimeout(() => { toast.classList.add('hidden'); }, 3000);
+        }
+
+        // --- Delete & Reason Functions ---
+        function deleteDetailItem() {
+            if (!window.currentDetailId) { alert('削除対象がありません'); return; }
+            if (!confirm('このアイテムを削除しますか？')) return;
+            ensureState();
+            var idx = window.state.unpurchased.findIndex(function (i) { return i.id === window.currentDetailId; });
+            if (idx > -1) {
+                window.state.unpurchased.splice(idx, 1);
+            } else {
+                idx = window.state.purchased.findIndex(function (i) { return i.id === window.currentDetailId; });
+                if (idx > -1) window.state.purchased.splice(idx, 1);
+            }
+            saveStateLocal();
+            renderHomeLocal();
+            closeDetailEdit();
+            showToast('削除しました');
+        }
+
+        // Attach ALL to window
+        window.deleteDetailItem = deleteDetailItem;
+        window.openSettings = openSettings;
+        window.closeSettings = closeSettings;
+        window.saveSettings = saveSettings;
+        window.forceRenderPublishers = forceRenderPublishers;
+        window.forceRenderAuthors = forceRenderAuthors;
+        window.deletePublisher = deletePublisher;
+        window.deleteAllPurchased = deleteAllPurchased;
+        window.hardResetApp = hardResetApp;
+        window.openPublisherModal = openPublisherModal;
+
+
+        // FORCE UNREGISTER SERVICE WORKER to fix caching issues
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                for (let registration of registrations) {
+                    console.log('Unregistering SW:', registration);
+                    registration.unregister();
+                }
+            });
+        }
+    </script>
+
+<body>
+
+    <!-- App Container -->
+    <div id="app">
+
+
+        <!-- Header -->
+        <header>
+            <h1 id="page-title">Book Manager</h1>
+            <button id="btn-settings" class="icon-btn" style="margin-left: auto; margin-right: 8px;"
+                onclick="openSettings()">
+                <span class="material-icons">settings</span>
+            </button>
+            <button id="header-action-btn" class="icon-btn hidden">
+                <span class="material-icons">check</span>
+            </button>
+        </header>
+
+        <!-- Main Content -->
+        <main>
+            <!-- 1. Home Screen -->
+            <section id="screen-home" class="screen active">
+                <div class="tabs">
+                    <button class="tab active" data-tab="unpurchased" onclick="toggleTab('unpurchased')">未購入</button>
+                    <button class="tab" data-tab="purchased" onclick="toggleTab('purchased')">購入済</button>
+                </div>
+
+                <div class="search-container" style="padding: 8px 16px; background: #f5f5f5; display: flex; gap: 8px;">
+                    <input type="text" id="search-text" class="text-input" placeholder="タイトル・作者検索..."
+                        style="flex: 2; font-size: 14px;">
+                    <select id="filter-publisher" class="text-input" style="flex: 1; font-size: 14px;">
+                        <option value="all">全出版社</option>
+                        <!-- Options injected by JS -->
+                    </select>
+                </div>
+
+                <div id="list-unpurchased" class="comic-list">
+                    <!-- Cards will be injected here -->
+                </div>
+
+                <div id="list-purchased" class="comic-list hidden">
+                    <!-- Cards will be injected here -->
+                </div>
+
+                <button id="fab-add-manual" class="fab"
+                    style="left: auto; right: 24px; background-color: var(--primary-color); color: white;"
+                    onclick="openManualAdd()">
+                    <span class="material-icons">edit</span>
+                </button>
+            </section>
+
+            <!-- 2. Manual Add/Edit Screen -->
+            <section id="screen-add" class="screen">
+                <div class="edit-container">
+                    <div class="input-group">
+                        <label class="input-label">タイトル</label>
+                        <input type="text" id="detail-title" class="text-input">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">作者</label>
+                        <select id="detail-author" class="text-input" onchange="checkAuthorSelect(this)">
+                            <!-- Injected -->
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label">巻数</label>
+                        <input type="number" id="detail-volume" class="text-input" style="width: 80px;">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">出版社</label>
+                        <select id="detail-publisher" class="text-input" onchange="checkPublisherSelect(this)">
+                            <!-- Options injected by JS -->
+                        </select>
+                    </div>
+
+                    <div class="edit-actions" style="margin-top: 32px;">
+                        <button id="btn-cancel-detail" class="btn-flat" style="margin-right: auto;"
+                            onclick="closeDetailEdit()">戻る</button>
+                        <button id="btn-delete-item" class="btn-flat text-danger"
+                            onclick="deleteDetailItem()">削除</button>
+
+                        <button id="btn-save-detail" class="primary" style="margin-left: 8px;"
+                            onclick="saveDetailItem()">保存</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+
+
+        <!-- Publisher Add Modal -->
+        <div id="modal-publisher" class="modal hidden">
+            <div class="modal-content">
+                <h3 style="margin-bottom: 16px;">出版社を追加</h3>
+                <input type="text" id="new-publisher-name" class="text-input" placeholder="出版社名">
+                <div class="modal-actions">
+                    <button id="btn-close-pub-modal" class="btn-flat">キャンセル</button>
+                    <button id="btn-save-publisher" class="primary">追加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Author Add Modal -->
+        <div id="modal-author" class="modal hidden">
+            <div class="modal-content">
+                <h3 style="margin-bottom: 16px;">作者を追加</h3>
+                <input type="text" id="new-author-name" class="text-input" placeholder="作者名">
+                <div class="modal-actions">
+                    <button id="btn-close-auth-modal" class="btn-flat">キャンセル</button>
+                    <button id="btn-save-author" class="primary">追加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Settings -->
+        <div id="modal-settings" class="modal hidden">
+            <div class="modal-content">
+                <h3>設定 <span style="font-size:12px; color:red;">v1</span></h3>
+
+                <div class="input-group">
+                    <label class="input-label">購入済みデータの自動削除</label>
+                    <select id="setting-auto-delete" class="text-input">
+                        <option value="never">削除しない</option>
+                        <option value="3">3日後</option>
+                        <option value="7">1週間後</option>
+                        <option value="30">1ヶ月後</option>
+                    </select>
+                </div>
+
+                <div class="input-group" style="margin-top: 20px;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <label class="input-label" style="margin-bottom: 0;">出版社管理</label>
+                        <button onclick="forceRenderPublishers()"
+                            style="background: none; border: none; color: var(--primary-color); font-size: 12px; cursor: pointer;">更新</button>
+                    </div>
+                    <div id="settings-publisher-list"
+                        style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; padding: 8px; border-radius: 4px; background: #fff;">
+                        <!-- Publishers injected here -->
+                    </div>
+                </div>
+
+                <div class="input-group" style="margin-top: 20px;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <label class="input-label" style="margin-bottom: 0;">作者管理</label>
+                        <button onclick="forceRenderAuthors()"
+                            style="background: none; border: none; color: var(--primary-color); font-size: 12px; cursor: pointer;">更新</button>
+                    </div>
+                    <div id="settings-author-list"
+                        style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; padding: 8px; border-radius: 4px; background: #fff;">
+                        <!-- Authors injected here -->
+                    </div>
+                </div>
+
+                <div class="input-group" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+                    <button id="btn-delete-all-purchased" class="btn-flat text-danger"
+                        style="width: 100%; border: 1px solid #ff5252; margin-bottom: 12px;"
+                        onclick="deleteAllPurchased()">
+                        購入済みデータを全て削除
+                    </button>
+                    <button onclick="hardResetApp()" class="btn-flat"
+                        style="width: 100%; color: #666; font-size: 12px;">
+                        アプリを初期化 (リロード)
+                    </button>
+                </div>
+
+                <div class="modal-actions">
+                    <button id="btn-close-settings" onclick="closeSettings()">閉じる</button>
+                    <button id="btn-save-settings" class="primary" onclick="saveSettings()">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notification -->
+        <div id="toast" class="toast hidden">Message</div>
+
+    </div>
+
+    <!-- 
+         DISABLED APP.JS to resolve conflict. 
+         All logic is now inside index.html for stability. 
+         <script src="app.js"></script> 
+    -->
+</body>
+
+</html>
